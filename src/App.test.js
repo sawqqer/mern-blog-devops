@@ -7,3 +7,10 @@ it('renders without crashing', () => {
   ReactDOM.render(<App />, div);
   ReactDOM.unmountComponentAtNode(div);
 });
+
+it('renders blog title', () => {
+  const div = document.createElement('div');
+  ReactDOM.render(<App />, div);
+  expect(div.textContent).toContain('MERN Blog');
+  ReactDOM.unmountComponentAtNode(div);
+});

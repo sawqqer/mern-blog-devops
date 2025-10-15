@@ -21,7 +21,8 @@ jobs:
         scan-type: 'fs'
         scan-ref: '.'
         format: 'table'
-        exit-code: '0'
+        exit-code: '1'
+        severity: 'CRITICAL,HIGH'
 
   # Build and test
   build-test:
@@ -41,7 +42,7 @@ jobs:
       run: npm ci
 
     - name: Run tests
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --coverage --watchAll=false --passWithNoTests
 
     - name: Build application
       run: npm run build
@@ -84,7 +85,8 @@ jobs:
       with:
         image-ref: mern-blog:latest
         format: 'table'
-        exit-code: '0'
+        exit-code: '1'
+        severity: 'CRITICAL,HIGH'
 
   # Deploy to GitHub Pages (optional)
   deploy-demo:
