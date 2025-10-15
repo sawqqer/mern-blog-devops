@@ -1,0 +1,121 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mern-blog-application-alerts
+  namespace: monitoring
+  labels:
+    app: mern-blog
+    component: alerting
+spec:
+  groups:
+  - name: mern-blog-application
+    rules:
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: critical
+        service: mern-blog
+      annotations:
+        summary: "High error rate detected in MERN Blog application"
+        description: "Error rate is {{ $value }} errors per second for the last 5 minutes"
+        runbook_url: "https://docs.mern-blog.com/runbooks/high-error-rate"
+    
+    - alert: HighResponseTime
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+      for: 5m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "High response time detected in MERN Blog application"
+        description: "95th percentile response time is {{ $value }} seconds for the last 5 minutes"
+        runbook_url: "https://docs.mern-blog.com/runbooks/high-response-time"
+    
+    - alert: ApplicationDown
+      expr: up{job="mern-blog-app"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: mern-blog
+      annotations:
+        summary: "MERN Blog application is down"
+        description: "Application has been down for more than 1 minute"
+        runbook_url: "https://docs.mern-blog.com/runbooks/application-down"
+    
+    - alert: HighCPUUsage
+      expr: rate(container_cpu_usage_seconds_total{namespace=~"mern-blog.*"}[5m]) > 0.8
+      for: 10m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "High CPU usage detected"
+        description: "CPU usage is {{ $value }}% for pod {{ $labels.pod }} in namespace {{ $labels.namespace }}"
+        runbook_url: "https://docs.mern-blog.com/runbooks/high-cpu-usage"
+    
+    - alert: HighMemoryUsage
+      expr: container_memory_usage_bytes{namespace=~"mern-blog.*"} / container_spec_memory_limit_bytes{namespace=~"mern-blog.*"} > 0.9
+      for: 10m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "High memory usage detected"
+        description: "Memory usage is {{ $value | humanizePercentage }} for pod {{ $labels.pod }} in namespace {{ $labels.namespace }}"
+        runbook_url: "https://docs.mern-blog.com/runbooks/high-memory-usage"
+    
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{namespace=~"mern-blog.*"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        service: mern-blog
+      annotations:
+        summary: "Pod is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+        runbook_url: "https://docs.mern-blog.com/runbooks/pod-crash-looping"
+    
+    - alert: DeploymentNotReady
+      expr: kube_deployment_status_replicas_ready{namespace=~"mern-blog.*"} != kube_deployment_status_replicas{namespace=~"mern-blog.*"}
+      for: 10m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "Deployment not ready"
+        description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} is not ready"
+        runbook_url: "https://docs.mern-blog.com/runbooks/deployment-not-ready"
+    
+    - alert: PersistentVolumeClaimFull
+      expr: kubelet_volume_stats_used_bytes{namespace=~"mern-blog.*"} / kubelet_volume_stats_capacity_bytes{namespace=~"mern-blog.*"} > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "Persistent volume claim is almost full"
+        description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} full"
+        runbook_url: "https://docs.mern-blog.com/runbooks/pvc-full"
+    
+    - alert: IngressDown
+      expr: up{job="kubernetes-ingress"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        service: mern-blog
+      annotations:
+        summary: "Ingress is down"
+        description: "Ingress for MERN Blog application is not responding"
+        runbook_url: "https://docs.mern-blog.com/runbooks/ingress-down"
+    
+    - alert: CertificateExpiringSoon
+      expr: (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 30
+      for: 0m
+      labels:
+        severity: warning
+        service: mern-blog
+      annotations:
+        summary: "SSL certificate expiring soon"
+        description: "SSL certificate for {{ $labels.name }} expires in {{ $value }} days"
+        runbook_url: "https://docs.mern-blog.com/runbooks/certificate-expiring"

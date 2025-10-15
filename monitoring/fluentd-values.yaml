@@ -1,0 +1,281 @@
+# Fluentd configuration values for Helm chart
+
+# Replica count
+replicaCount: 2
+
+# Image configuration
+image:
+  repository: fluent/fluentd-kubernetes-daemonset
+  tag: "v1.16-debian-elasticsearch7-1"
+  pullPolicy: IfNotPresent
+
+# Resource configuration
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 100m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+# Security context
+securityContext:
+  runAsUser: 0
+  runAsGroup: 0
+  fsGroup: 0
+
+# Pod security context
+podSecurityContext:
+  runAsUser: 0
+  runAsGroup: 0
+  fsGroup: 0
+
+# Node selector
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Tolerations
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+
+# Affinity
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/os
+          operator: In
+          values:
+          - linux
+
+# Environment variables
+env:
+  - name: OPENSEARCH_HOST
+    value: "opensearch"
+  - name: OPENSEARCH_PORT
+    value: "9200"
+  - name: OPENSEARCH_SCHEME
+    value: "http"
+  - name: OPENSEARCH_SSL_VERIFY
+    value: "false"
+  - name: OPENSEARCH_SSL_VERSION
+    value: "TLSv1_2"
+  - name: OPENSEARCH_RELOAD_CONNECTIONS
+    value: "false"
+  - name: OPENSEARCH_RECONNECT_ON_ERROR
+    value: "true"
+  - name: OPENSEARCH_RELOAD_ON_FAILURE
+    value: "true"
+  - name: OPENSEARCH_LOG_ES_400_REASON
+    value: "false"
+  - name: OPENSEARCH_LOGSTASH_PREFIX
+    value: "logstash"
+  - name: OPENSEARCH_LOGSTASH_FORMAT
+    value: "true"
+  - name: OPENSEARCH_LOGSTASH_DATEFORMAT
+    value: "%Y%m%d"
+  - name: OPENSEARCH_INDEX_NAME
+    value: "logstash"
+  - name: OPENSEARCH_TYPE_NAME
+    value: "_doc"
+  - name: OPENSEARCH_INCLUDE_TIMESTAMP
+    value: "true"
+  - name: OPENSEARCH_TEMPLATE_NAME
+    value: "logstash"
+  - name: OPENSEARCH_TEMPLATE_FILE
+    value: "/fluentd/etc/opensearch-template.json"
+  - name: OPENSEARCH_TEMPLATE_OVERWRITE
+    value: "true"
+  - name: OPENSEARCH_TEMPLATE_PATTERN
+    value: "logstash-*"
+  - name: OPENSEARCH_REQUEST_TIMEOUT
+    value: "5s"
+  - name: OPENSEARCH_SUPPRESS_TYPE_NAME
+    value: "true"
+  - name: FLUENTD_SYSTEMD_CONF
+    value: "disable"
+  - name: FLUENTD_PROMETHEUS_CONF
+    value: "disable"
+
+# Volume mounts
+volumeMounts:
+  - name: varlog
+    mountPath: /var/log
+    readOnly: true
+  - name: varlibdockercontainers
+    mountPath: /var/lib/docker/containers
+    readOnly: true
+  - name: fluentd-config
+    mountPath: /fluentd/etc
+  - name: fluentd-buffer
+    mountPath: /var/log/fluentd-buffers
+
+# Volumes
+volumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: varlibdockercontainers
+    hostPath:
+      path: /var/lib/docker/containers
+  - name: fluentd-config
+    configMap:
+      name: fluentd-config
+  - name: fluentd-buffer
+    emptyDir: {}
+
+# ConfigMap for Fluentd configuration
+configMaps:
+  fluentd-config:
+    fluent.conf: |
+      @include systemd.conf
+      @include kubernetes.conf
+      @include conf.d/*.conf
+
+      <match **>
+        @type opensearch
+        @id out_os
+        @log_level info
+        include_tag_key true
+        host "#{ENV['OPENSEARCH_HOST']}"
+        port "#{ENV['OPENSEARCH_PORT']}"
+        path ""
+        scheme "#{ENV['OPENSEARCH_SCHEME']}"
+        ssl_verify "#{ENV['OPENSEARCH_SSL_VERIFY']}"
+        ssl_version "#{ENV['OPENSEARCH_SSL_VERSION']}"
+        reload_connections "#{ENV['OPENSEARCH_RELOAD_CONNECTIONS']}"
+        reconnect_on_error "#{ENV['OPENSEARCH_RECONNECT_ON_ERROR']}"
+        reload_on_failure "#{ENV['OPENSEARCH_RELOAD_ON_FAILURE']}"
+        log_es_400_reason "#{ENV['OPENSEARCH_LOG_ES_400_REASON']}"
+        logstash_prefix "#{ENV['OPENSEARCH_LOGSTASH_PREFIX']}"
+        logstash_format "#{ENV['OPENSEARCH_LOGSTASH_FORMAT']}"
+        logstash_dateformat "#{ENV['OPENSEARCH_LOGSTASH_DATEFORMAT']}"
+        index_name "#{ENV['OPENSEARCH_INDEX_NAME']}"
+        type_name "#{ENV['OPENSEARCH_TYPE_NAME']}"
+        include_timestamp "#{ENV['OPENSEARCH_INCLUDE_TIMESTAMP']}"
+        template_name "#{ENV['OPENSEARCH_TEMPLATE_NAME']}"
+        template_file "#{ENV['OPENSEARCH_TEMPLATE_FILE']}"
+        template_overwrite "#{ENV['OPENSEARCH_TEMPLATE_OVERWRITE']}"
+        template_pattern "#{ENV['OPENSEARCH_TEMPLATE_PATTERN']}"
+        request_timeout "#{ENV['OPENSEARCH_REQUEST_TIMEOUT']}"
+        suppress_type_name "#{ENV['OPENSEARCH_SUPPRESS_TYPE_NAME']}"
+        <buffer>
+          @type file
+          path /var/log/fluentd-buffers/kubernetes.system.buffer
+          flush_mode interval
+          retry_type exponential_backoff
+          flush_thread_count 2
+          flush_interval 5s
+          retry_forever
+          retry_max_interval 30
+          chunk_limit_size 2M
+          queue_limit_length 8
+          overflow_action block
+        </buffer>
+      </match>
+
+    kubernetes.conf: |
+      <source>
+        @type tail
+        @id in_tail_container_logs
+        path /var/log/containers/*.log
+        pos_file /var/log/fluentd-containers.log.pos
+        tag kubernetes.*
+        read_from_head true
+        <parse>
+          @type json
+          time_format %Y-%m-%dT%H:%M:%S.%NZ
+        </parse>
+      </source>
+
+      <source>
+        @type tail
+        @id in_tail_container_logs
+        path /var/log/containers/*.log
+        pos_file /var/log/fluentd-containers.log.pos
+        tag kubernetes.*
+        read_from_head true
+        <parse>
+          @type json
+          time_format %Y-%m-%dT%H:%M:%S.%NZ
+        </parse>
+      </source>
+
+      <filter kubernetes.**>
+        @type kubernetes_metadata
+        @id filter_kube_metadata
+        kubernetes_url "#{ENV['FLUENT_FILTER_KUBERNETES_URL'] || 'https://' + ENV['KUBERNETES_SERVICE_HOST'] + ':' + ENV['KUBERNETES_SERVICE_PORT'] + '/api'}"
+        verify_ssl "#{ENV['KUBERNETES_VERIFY_SSL'] || true}"
+        ca_file "#{ENV['KUBERNETES_CA_FILE']}"
+      </filter>
+
+      <filter kubernetes.**>
+        @type record_transformer
+        @id filter_kube_metadata
+        <record>
+          kubernetes_cluster_name "#{ENV['KUBERNETES_CLUSTER_NAME'] || 'unknown'}"
+          kubernetes_node_name "#{ENV['NODE_NAME']}"
+        </record>
+      </filter>
+
+    opensearch-template.json: |
+      {
+        "template": "logstash-*",
+        "version": 50001,
+        "settings": {
+          "index.refresh_interval": "5s",
+          "number_of_shards": 1,
+          "number_of_replicas": 0
+        },
+        "mappings": {
+          "_default_": {
+            "_all": {
+              "enabled": true,
+              "norms": false
+            },
+            "dynamic_templates": [
+              {
+                "template1": {
+                  "match": "*",
+                  "mapping": {
+                    "type": "keyword",
+                    "ignore_above": 1024
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "@timestamp": {
+                "type": "date"
+              },
+              "message": {
+                "type": "text",
+                "analyzer": "standard"
+              },
+              "kubernetes": {
+                "type": "object",
+                "properties": {
+                  "pod_name": {
+                    "type": "keyword"
+                  },
+                  "namespace_name": {
+                    "type": "keyword"
+                  },
+                  "container_name": {
+                    "type": "keyword"
+                  },
+                  "host": {
+                    "type": "keyword"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }

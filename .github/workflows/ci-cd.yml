@@ -1,0 +1,276 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  AWS_REGION: us-west-2
+  EKS_CLUSTER_NAME: mern-blog-eks
+  ECR_REPOSITORY: mern-blog
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+jobs:
+  # Security scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Build and test
+  build-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run linting
+      run: npm run lint --if-present
+
+    - name: Run tests
+      run: npm test -- --coverage --watchAll=false
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage/lcov.info
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Build application
+      run: npm run build
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-files
+        path: build/
+
+  # Build and push Docker image
+  docker-build:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: github.event_name == 'push'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-files
+        path: build/
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+    - name: Scan Docker image with Trivy
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-image-results.sarif'
+
+    - name: Upload Trivy image scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-image-results.sarif'
+
+  # Deploy to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Deploy to staging
+      run: |
+        # Update image tag in deployment
+        sed -i "s|image: mern-blog:.*|image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}|g" k8s/deployment.yaml
+        
+        # Apply staging manifests
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/rbac.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl apply -f k8s/ingress.yaml
+        kubectl apply -f k8s/network-policy.yaml
+        kubectl apply -f k8s/pod-security-policy.yaml
+        kubectl apply -f k8s/hpa.yaml
+        kubectl apply -f k8s/pdb.yaml
+        kubectl apply -f k8s/deployment.yaml
+        
+        # Wait for deployment to complete
+        kubectl rollout status deployment/mern-blog-staging -n mern-blog-staging --timeout=300s
+
+    - name: Run smoke tests
+      run: |
+        # Get the staging URL
+        STAGING_URL=$(kubectl get ingress mern-blog-ingress-staging -n mern-blog-staging -o jsonpath='{.spec.rules[0].host}')
+        
+        # Wait for the service to be ready
+        sleep 30
+        
+        # Run basic health check
+        curl -f http://$STAGING_URL/health || exit 1
+        
+        # Run additional smoke tests
+        curl -f http://$STAGING_URL/ || exit 1
+
+  # Deploy to production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker-build, deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Deploy to production
+      run: |
+        # Update image tag in deployment
+        sed -i "s|image: mern-blog:.*|image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}|g" k8s/deployment.yaml
+        
+        # Apply production manifests
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/rbac.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl apply -f k8s/ingress.yaml
+        kubectl apply -f k8s/network-policy.yaml
+        kubectl apply -f k8s/pod-security-policy.yaml
+        kubectl apply -f k8s/hpa.yaml
+        kubectl apply -f k8s/pdb.yaml
+        kubectl apply -f k8s/deployment.yaml
+        
+        # Wait for deployment to complete
+        kubectl rollout status deployment/mern-blog -n mern-blog --timeout=300s
+
+    - name: Run production smoke tests
+      run: |
+        # Get the production URL
+        PROD_URL=$(kubectl get ingress mern-blog-ingress -n mern-blog -o jsonpath='{.spec.rules[0].host}')
+        
+        # Wait for the service to be ready
+        sleep 60
+        
+        # Run basic health check
+        curl -f https://$PROD_URL/health || exit 1
+        
+        # Run additional smoke tests
+        curl -f https://$PROD_URL/ || exit 1
+
+    - name: Notify deployment success
+      if: success()
+      run: |
+        echo "✅ Production deployment successful!"
+        echo "🚀 Application is live at: https://$PROD_URL"
+
+  # Cleanup old images
+  cleanup:
+    name: Cleanup Old Images
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Cleanup old ECR images
+      run: |
+        # Keep only the last 10 images
+        aws ecr list-images --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} \
+          --query 'imageIds[?imagePushedAt<`'$(date -d '30 days ago' -u +%Y-%m-%dT%H:%M:%S.000Z)'`]' \
+          --output json | jq -r '.[].imageDigest' | head -n -10 | \
+          xargs -r aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} --region ${{ env.AWS_REGION }} --image-ids imageDigest=

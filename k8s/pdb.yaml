@@ -1,0 +1,31 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mern-blog-pdb
+  namespace: mern-blog
+  labels:
+    app: mern-blog
+    component: availability
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mern-blog
+      component: frontend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mern-blog-pdb-staging
+  namespace: mern-blog-staging
+  labels:
+    app: mern-blog
+    component: availability
+    environment: staging
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: mern-blog
+      component: frontend
+      environment: staging

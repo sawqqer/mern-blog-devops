@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  # React application
+  react-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    networks:
+      - blog-network
+
+networks:
+  blog-network:
+    driver: bridge

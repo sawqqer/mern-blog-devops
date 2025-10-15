@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app: alertmanager
+type: Opaque
+stringData:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alerts@mern-blog.com'
+      smtp_auth_username: 'alerts@mern-blog.com'
+      smtp_auth_password: 'password'
+    
+    # Slack configuration
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts'
+        title: 'MERN Blog Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        send_resolved: true
+    
+    # PagerDuty configuration
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_INTEGRATION_KEY}'
+        description: '{{ .GroupLabels.alertname }}'
+        details:
+          summary: '{{ .CommonAnnotations.summary }}'
+          description: '{{ .CommonAnnotations.description }}'
+    
+    # Route configuration
+    route:
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'web.hook'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'pagerduty'
+        group_wait: 10s
+        repeat_interval: 5m
+      - match:
+          severity: warning
+        receiver: 'slack'
+        group_wait: 30s
+        repeat_interval: 30m
+    
+    # Receivers
+    receivers:
+    - name: 'web.hook'
+      webhook_configs:
+      - url: 'http://localhost:9093/webhook'
+    
+    - name: 'slack'
+      slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts'
+        title: 'MERN Blog Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Status:* {{ .Status }}
+          {{ end }}
+        send_resolved: true
+    
+    - name: 'pagerduty'
+      pagerduty_configs:
+      - service_key: '${PAGERDUTY_INTEGRATION_KEY}'
+        description: '{{ .GroupLabels.alertname }}'
+        details:
+          summary: '{{ .CommonAnnotations.summary }}'
+          description: '{{ .CommonAnnotations.description }}'
+          severity: '{{ .CommonLabels.severity }}'
+    
+    # Inhibit rules
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'dev', 'instance']

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mern-blog
+  labels:
+    name: mern-blog
+    environment: production
+    managed-by: terraform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mern-blog-staging
+  labels:
+    name: mern-blog-staging
+    environment: staging
+    managed-by: terraform

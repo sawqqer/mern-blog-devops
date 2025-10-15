@@ -1,0 +1,154 @@
+# OpenSearch Dashboards configuration values for Helm chart
+
+# Replica count
+replicaCount: 1
+
+# Image configuration
+image:
+  repository: opensearchproject/opensearch-dashboards
+  tag: "2.11.0"
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 5601
+  targetPort: 5601
+
+# Persistence configuration
+persistence:
+  enabled: true
+  storageClass: gp3
+  size: 5Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Resource configuration
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 1Gi
+    cpu: 500m
+
+# OpenSearch Dashboards configuration
+config:
+  opensearch_dashboards.yml: |
+    server.host: "0.0.0.0"
+    server.port: 5601
+    opensearch.hosts: ["http://opensearch:9200"]
+    opensearch.security.multitenancy.enabled: false
+    opensearch.security.readonly_mode.roles: []
+    opensearch.security.session.keepalive: true
+    opensearch.security.session.timeout: 600000
+    opensearch.security.cookie.secure: false
+    opensearch.security.cookie.ttl: 3600000
+    opensearch.security.cookie.isSameSite: "Lax"
+    opensearch.security.auth.type: "basicauth"
+    opensearch.security.auth.anonymous_auth_enabled: true
+    opensearch.security.auth.unauthenticated_routes: ["/app/login", "/bundles", "/api/core", "/api/status"]
+    opensearch.security.check_for_updates: true
+    opensearch.security.display_tenant_selector: true
+    opensearch.security.multitenancy.enabled: false
+    opensearch.security.readonly_mode.roles: []
+    opensearch.security.session.keepalive: true
+    opensearch.security.session.timeout: 600000
+    opensearch.security.cookie.secure: false
+    opensearch.security.cookie.ttl: 3600000
+    opensearch.security.cookie.isSameSite: "Lax"
+    opensearch.security.auth.type: "basicauth"
+    opensearch.security.auth.anonymous_auth_enabled: true
+    opensearch.security.auth.unauthenticated_routes: ["/app/login", "/bundles", "/api/core", "/api/status"]
+    opensearch.security.check_for_updates: true
+    opensearch.security.display_tenant_selector: true
+    logging.appenders:
+      console:
+        type: console
+        layout:
+          type: pattern
+          pattern: "[%d{ISO8601}][%-5p][%-25c][%node.id] %m%n"
+      file:
+        type: file
+        fileName: /usr/share/opensearch-dashboards/logs/opensearch_dashboards.log
+        layout:
+          type: pattern
+          pattern: "[%d{ISO8601}][%-5p][%-25c][%node.id] %m%n"
+    logging.loggers:
+      - name: opensearch_dashboards
+        level: info
+        appenders:
+          - console
+          - file
+      - name: plugins
+        level: info
+        appenders:
+          - console
+          - file
+      - name: server
+        level: info
+        appenders:
+          - console
+          - file
+      - name: opensearch
+        level: info
+        appenders:
+          - console
+          - file
+
+# Environment variables
+env:
+  - name: "OPENSEARCH_DASHBOARDS_JAVA_OPTS"
+    value: "-Xms512m -Xmx1g"
+
+# Security context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Node selector
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Tolerations
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+# Affinity
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/os
+          operator: In
+          values:
+          - linux
+
+# Health check configuration
+healthcheck:
+  enabled: true
+  interval: 30s
+  timeout: 10s
+  retries: 5
+  startPeriod: 90s
+
+# Volume mounts
+volumeMounts:
+  - name: dashboards-data
+    mountPath: /usr/share/opensearch-dashboards/data
+
+# Volumes
+volumes:
+  - name: dashboards-data
+    persistentVolumeClaim:
+      claimName: opensearch-dashboards-data

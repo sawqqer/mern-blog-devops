@@ -1,0 +1,189 @@
+name: Monitoring and Alerting Setup
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'monitoring/**'
+      - 'k8s/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'monitoring/**'
+      - 'k8s/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  EKS_CLUSTER_NAME: mern-blog-eks
+
+jobs:
+  setup-monitoring:
+    name: Setup Monitoring Stack
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    environment: monitoring
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Add Prometheus Helm repository
+      run: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
+
+    - name: Install Prometheus Stack
+      run: |
+        helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+          --namespace monitoring \
+          --create-namespace \
+          --values monitoring/prometheus-values.yaml \
+          --wait
+
+    - name: Add OpenSearch Helm repository
+      run: |
+        helm repo add opensearch https://opensearch-project.github.io/helm-charts
+        helm repo update
+
+    - name: Install OpenSearch
+      run: |
+        helm upgrade --install opensearch opensearch/opensearch \
+          --namespace logging \
+          --create-namespace \
+          --values monitoring/opensearch-values.yaml \
+          --wait
+
+    - name: Install OpenSearch Dashboards
+      run: |
+        helm upgrade --install opensearch-dashboards opensearch/opensearch-dashboards \
+          --namespace logging \
+          --values monitoring/opensearch-dashboards-values.yaml \
+          --wait
+
+    - name: Install Fluentd
+      run: |
+        helm repo add fluent https://fluent.github.io/helm-charts
+        helm repo update
+        helm upgrade --install fluentd fluent/fluentd \
+          --namespace logging \
+          --values monitoring/fluentd-values.yaml \
+          --wait
+
+    - name: Setup Grafana Dashboards
+      run: |
+        kubectl apply -f monitoring/grafana-dashboards/
+        kubectl apply -f monitoring/grafana-datasources/
+
+    - name: Setup AlertManager Configuration
+      run: |
+        kubectl apply -f monitoring/alertmanager-config.yaml
+
+    - name: Verify Monitoring Stack
+      run: |
+        echo "Checking Prometheus status..."
+        kubectl get pods -n monitoring
+        echo "Checking OpenSearch status..."
+        kubectl get pods -n logging
+        echo "Checking Grafana access..."
+        kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80 &
+        sleep 10
+        curl -f http://localhost:3000/api/health || echo "Grafana not ready yet"
+
+  setup-alerting:
+    name: Setup Alerting Rules
+    runs-on: ubuntu-latest
+    needs: setup-monitoring
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Apply Alerting Rules
+      run: |
+        kubectl apply -f monitoring/alert-rules/
+        kubectl apply -f monitoring/recording-rules/
+
+    - name: Setup Slack Integration
+      run: |
+        # Create secret for Slack webhook
+        kubectl create secret generic slack-webhook \
+          --from-literal=url="${{ secrets.SLACK_WEBHOOK_URL }}" \
+          -n monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Setup PagerDuty Integration
+      run: |
+        # Create secret for PagerDuty
+        kubectl create secret generic pagerduty-key \
+          --from-literal=key="${{ secrets.PAGERDUTY_INTEGRATION_KEY }}" \
+          -n monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+  security-scanning:
+    name: Security Scanning Setup
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Install Trivy Operator
+      run: |
+        helm repo add aqua https://aquasecurity.github.io/helm-charts/
+        helm repo update
+        helm upgrade --install trivy-operator aqua/trivy-operator \
+          --namespace trivy-system \
+          --create-namespace \
+          --values monitoring/trivy-operator-values.yaml \
+          --wait
+
+    - name: Install Falco
+      run: |
+        helm repo add falcosecurity https://falcosecurity.github.io/charts
+        helm repo update
+        helm upgrade --install falco falcosecurity/falco \
+          --namespace falco \
+          --create-namespace \
+          --values monitoring/falco-values.yaml \
+          --wait
+
+    - name: Setup Network Policies
+      run: |
+        kubectl apply -f k8s/network-policy.yaml
+
+    - name: Setup Pod Security Policies
+      run: |
+        kubectl apply -f k8s/pod-security-policy.yaml

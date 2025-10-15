@@ -1,0 +1,250 @@
+# Trivy Operator configuration values for Helm chart
+
+# Image configuration
+image:
+  repository: aquasec/trivy-operator
+  tag: "0.18.2"
+  pullPolicy: IfNotPresent
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: trivy-operator
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Cluster role configuration
+clusterRole:
+  create: true
+
+# Cluster role binding configuration
+clusterRoleBinding:
+  create: true
+
+# Webhook configuration
+webhook:
+  enabled: true
+  port: 8443
+  certManager:
+    enabled: true
+    issuer:
+      name: trivy-operator-selfsigned-issuer
+      kind: Issuer
+
+# Resource configuration
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 50m
+  limits:
+    memory: 128Mi
+    cpu: 100m
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Configuration
+config:
+  # Trivy configuration
+  trivy:
+    # Image configuration
+    image:
+      repository: aquasec/trivy
+      tag: "0.47.0"
+      pullPolicy: IfNotPresent
+    
+    # Resource configuration
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+    
+    # Security context
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    
+    # Trivy specific configuration
+    command: image
+    skipFiles: "/var/run/secrets/kubernetes.io/serviceaccount"
+    skipDirs: "/var/lib/containers"
+    timeout: "5m0s"
+    ignoreUnfixed: false
+    offlineScan: false
+    insecure: false
+    vulnType: "os,library"
+    severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
+    ignoreFile: ""
+    format: "json"
+    template: ""
+    includeNonFailures: false
+    token: ""
+    tokenHeader: "Trivy-Token"
+    customHeaders: ""
+    cacheDir: ""
+    dbRepository: "ghcr.io/aquasecurity/trivy-db"
+    javaDbRepository: "ghcr.io/aquasecurity/trivy-java-db"
+    imageRef: ""
+    imageConfigSecret: ""
+    additionalVolumes: []
+    additionalVolumeMounts: []
+    env: []
+    envFrom: []
+    initContainers: []
+    sidecars: []
+    volumeMounts: []
+    volumes: []
+    tolerations: []
+    nodeSelector: {}
+    affinity: {}
+
+# Vulnerability report configuration
+vulnerabilityReports:
+  enabled: true
+  # Schedule for vulnerability scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Config audit report configuration
+configAuditReports:
+  enabled: true
+  # Schedule for config audit scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Rbac assessment report configuration
+rbacAssessmentReports:
+  enabled: true
+  # Schedule for RBAC assessment scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Secret report configuration
+secretReports:
+  enabled: true
+  # Schedule for secret scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Exposed secret report configuration
+exposedSecretReports:
+  enabled: true
+  # Schedule for exposed secret scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Compliance report configuration
+complianceReports:
+  enabled: true
+  # Schedule for compliance scanning
+  schedule: "0 0 * * *"
+  # Retention policy
+  retention: "30d"
+
+# Admission controller configuration
+admissionController:
+  enabled: true
+  # Failure policy
+  failurePolicy: Fail
+  # Namespace selector
+  namespaceSelector:
+    matchExpressions:
+    - key: name
+      operator: NotIn
+      values:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - trivy-system
+  
+  # Policy configuration
+  policies:
+    - name: vulnerability-scan
+      enabled: true
+      policy: Fail
+      severity: CRITICAL,HIGH
+    - name: config-audit
+      enabled: true
+      policy: Warn
+    - name: rbac-assessment
+      enabled: true
+      policy: Warn
+    - name: secret-scan
+      enabled: true
+      policy: Fail
+    - name: exposed-secret-scan
+      enabled: true
+      policy: Fail
+    - name: compliance-scan
+      enabled: true
+      policy: Warn
+
+# Metrics configuration
+metrics:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 8443
+    targetPort: 8443
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8443"
+      prometheus.io/path: "/metrics"
+
+# Service monitor configuration
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    app: trivy-operator
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Pod monitor configuration
+podMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    app: trivy-operator
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Grafana dashboard configuration
+grafanaDashboard:
+  enabled: true
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"

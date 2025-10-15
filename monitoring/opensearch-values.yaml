@@ -1,0 +1,130 @@
+# OpenSearch configuration values for Helm chart
+
+# Single node configuration for development
+singleNode: true
+
+# Replica count
+replicaCount: 1
+
+# Image configuration
+image:
+  repository: opensearchproject/opensearch
+  tag: "2.11.0"
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9200
+  targetPort: 9200
+
+# Persistence configuration
+persistence:
+  enabled: true
+  storageClass: gp3
+  size: 50Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Resource configuration
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 1000m
+  limits:
+    memory: 4Gi
+    cpu: 2000m
+
+# OpenSearch configuration
+config:
+  opensearch.yml: |
+    cluster.name: opensearch-cluster
+    node.name: opensearch-node
+    discovery.type: single-node
+    bootstrap.memory_lock: true
+    network.host: 0.0.0.0
+    http.port: 9200
+    transport.port: 9300
+    plugins.security.disabled: true
+    cluster.initial_cluster_manager_nodes: opensearch-node
+    path.data: /usr/share/opensearch/data
+    path.logs: /usr/share/opensearch/logs
+    plugins.security.ssl.http.enabled: false
+    plugins.security.ssl.transport.enabled: false
+
+# Environment variables
+env:
+  - name: "OPENSEARCH_JAVA_OPTS"
+    value: "-Xms2g -Xmx2g"
+
+# Security context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Node selector
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Tolerations
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+# Affinity
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/os
+          operator: In
+          values:
+          - linux
+
+# Health check configuration
+healthcheck:
+  enabled: true
+  interval: 30s
+  timeout: 10s
+  retries: 5
+  startPeriod: 90s
+
+# Init containers for setup
+initContainers:
+  - name: fix-permissions
+    image: busybox:1.35
+    command:
+      - sh
+      - -c
+      - |
+        chown -R 1000:1000 /usr/share/opensearch/data
+        chown -R 1000:1000 /usr/share/opensearch/logs
+    volumeMounts:
+      - name: data
+        mountPath: /usr/share/opensearch/data
+      - name: logs
+        mountPath: /usr/share/opensearch/logs
+
+# Volume mounts
+volumeMounts:
+  - name: data
+    mountPath: /usr/share/opensearch/data
+  - name: logs
+    mountPath: /usr/share/opensearch/logs
+
+# Volumes
+volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: opensearch-data
+  - name: logs
+    emptyDir: {}

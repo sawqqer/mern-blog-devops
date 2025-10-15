@@ -1,0 +1,209 @@
+# Prometheus configuration values for Helm chart
+
+prometheus:
+  prometheusSpec:
+    # Retention policy
+    retention: 30d
+    retentionSize: 50GB
+    
+    # Storage configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+    
+    # Resource limits
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 4Gi
+        cpu: 2000m
+    
+    # Service monitor configuration
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    
+    # Additional scrape configs
+    additionalScrapeConfigs:
+      - job_name: 'mern-blog-app'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - mern-blog
+                - mern-blog-staging
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_service_name]
+            action: replace
+            target_label: kubernetes_name
+
+grafana:
+  enabled: true
+  
+  # Admin credentials
+  adminPassword: admin123
+  
+  # Persistence
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 10Gi
+  
+  # Resource limits
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 80
+  
+  # Grafana configuration
+  grafana.ini:
+    server:
+      root_url: http://grafana.mern-blog.com
+    security:
+      allow_embedding: true
+      cookie_secure: false
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+    users:
+      allow_sign_up: false
+      auto_assign_org: true
+      auto_assign_org_role: Viewer
+  
+  # Dashboard providers
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+  
+  # Dashboards
+  dashboards:
+    default:
+      kubernetes-cluster-monitoring:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      kubernetes-pod-monitoring:
+        gnetId: 6417
+        revision: 1
+        datasource: Prometheus
+      node-exporter-full:
+        gnetId: 1860
+        revision: 27
+        datasource: Prometheus
+
+alertmanager:
+  enabled: true
+  
+  # Storage configuration
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    
+    # Resource limits
+    resources:
+      requests:
+        memory: 128Mi
+        cpu: 100m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+    
+    # Alertmanager configuration
+    configSecret: alertmanager-config
+
+# Node exporter configuration
+nodeExporter:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+# Kube state metrics
+kubeStateMetrics:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+# Kubelet configuration
+kubelet:
+  enabled: true
+
+# Kube controller manager
+kubeControllerManager:
+  enabled: true
+
+# Kube scheduler
+kubeScheduler:
+  enabled: true
+
+# Kube etcd
+kubeEtcd:
+  enabled: true
+
+# Kube proxy
+kubeProxy:
+  enabled: true
+
+# Kube API server
+kubeApiServer:
+  enabled: true
